@@ -17,6 +17,15 @@ export const CITIES = [
 const CITY_SHEET_ALIAS: Record<string, string> = {
   "Mum Watsapp": "Mumbai",
 };
+/**
+ * Per-city sheet (in the same FG workbook) that lists ONLY the stores that
+ * have an FNV trip — used by gro_bread_milk to segregate FNV stores out.
+ * If this sheet is missing or empty, we fall back to detecting FNV per-store
+ * from the Type column within the city's own FG sheet.
+ */
+const CITY_FNV_STORE_SHEET: Record<string, string> = {
+  Bengaluru: "benfnv",
+};
 function sheetNameForCity(city: string): string {
   return CITY_SHEET_ALIAS[city] ?? city;
 }
@@ -160,6 +169,64 @@ function processWatsappGroups(
 }
 
 /**
+ * Reads the city's dedicated FNV-store-list sheet (e.g. "benfnv" for
+ * Bengaluru) from the FG workbook, if present and populated. Returns the set
+ * of normalized CustomerNames that have FNV, or null if that sheet doesn't
+ * exist yet / has no data rows — callers should fall back to detecting FNV
+ * from the Type column of the main FG sheet in that case.
+ */
+function readFnvStoreSet(fgWb: XLSX.WorkBook | null, city: string): Set<string> | null {
+  const sheetName = CITY_FNV_STORE_SHEET[city];
+  if (!sheetName || !fgWb || !fgWb.Sheets[sheetName]) return null;
+  const rows = readSheet(fgWb, sheetName);
+  if (!rows.length) return null;
+  const set = new Set<string>();
+  for (const r of rows) {
+    const custKey = pickCol(r, "CustomerName") || "CustomerName";
+    const cust = norm(r[custKey]);
+    if (cust) set.add(cust);
+  }
+  return set.size ? set : null;
+}
+
+/**
+ * Per-store mapping that EXCLUDES any store whose CustomerName is present in
+ * excludeCustomers — used for GRO Merge (Bread + Milk) when a dedicated FNV
+ * store-list sheet is available: only stores NOT in that set are considered;
+ * for those, Bread/Egg SoIds merge onto that same store's Milk TrmId.
+ */
+function perStoreMapExcludingSet(
+  fg: Row[],
+  excludeCustomers: Set<string>,
+  trmFilter: (r: Row) => boolean,
+  soIdFilter: (r: Row) => boolean,
+): OutRow[] {
+  const out: OutRow[] = [];
+  const byCust = new Map<string, { trms: any[]; sos: any[] }>();
+  for (const r of fg) {
+    const custKey = pickCol(r, "CustomerName") || "CustomerName";
+    const cust = norm(r[custKey]);
+    if (!cust || excludeCustomers.has(cust)) continue;
+    if (!byCust.has(cust)) byCust.set(cust, { trms: [], sos: [] });
+    const entry = byCust.get(cust)!;
+    if (trmFilter(r)) {
+      const t = r[pickCol(r, "TrmId") || "TrmId"];
+      if (t != null && t !== "") entry.trms.push(t);
+    }
+    if (soIdFilter(r)) {
+      const s = r[pickCol(r, "SoId") || "SoId"];
+      if (s != null && s !== "") entry.sos.push(s);
+    }
+  }
+  for (const { trms, sos } of byCust.values()) {
+    if (!trms.length || !sos.length) continue;
+    const trmId = trms[0];
+    for (const s of sos) out.push({ TrmId: trmId, SoId: s });
+  }
+  return out;
+}
+
+/**
  * Per-store mapping with a fallback TrmId source: for each store, prefer the
  * primary filter's TrmId (e.g. FNV); if that store has none, fall back to the
  * fallback filter's TrmId instead (e.g. Milk) — so a store with no FNV trip
@@ -197,6 +264,46 @@ function perStoreMapFallback(
     if (!sos.length) continue;
     const trmId = primaryTrms.length ? primaryTrms[0] : fallbackTrms.length ? fallbackTrms[0] : undefined;
     if (trmId == null) continue;
+    for (const s of sos) out.push({ TrmId: trmId, SoId: s });
+  }
+  return out;
+}
+
+/**
+ * Per-store mapping that EXCLUDES any store which has an "excludeFilter" row
+ * (e.g. FNV) — used for GRO Merge (Bread + Milk): only stores with NO FNV
+ * trip are considered; for those, Bread/Egg SoIds merge onto that same
+ * store's Milk TrmId. Stores that do have FNV are segregated out entirely
+ * (they're handled by fnv_gro_bread instead).
+ */
+function perStoreMapExcluding(
+  fg: Row[],
+  excludeFilter: (r: Row) => boolean,
+  trmFilter: (r: Row) => boolean,
+  soIdFilter: (r: Row) => boolean,
+): OutRow[] {
+  const out: OutRow[] = [];
+  const byCust = new Map<string, { excluded: boolean; trms: any[]; sos: any[] }>();
+  for (const r of fg) {
+    const custKey = pickCol(r, "CustomerName") || "CustomerName";
+    const cust = norm(r[custKey]);
+    if (!cust) continue;
+    if (!byCust.has(cust)) byCust.set(cust, { excluded: false, trms: [], sos: [] });
+    const entry = byCust.get(cust)!;
+    if (excludeFilter(r)) entry.excluded = true;
+    if (trmFilter(r)) {
+      const t = r[pickCol(r, "TrmId") || "TrmId"];
+      if (t != null && t !== "") entry.trms.push(t);
+    }
+    if (soIdFilter(r)) {
+      const s = r[pickCol(r, "SoId") || "SoId"];
+      if (s != null && s !== "") entry.sos.push(s);
+    }
+  }
+  for (const { excluded, trms, sos } of byCust.values()) {
+    if (excluded) continue; // store has FNV — segregated out, not part of this merge
+    if (!trms.length || !sos.length) continue;
+    const trmId = trms[0];
     for (const s of sos) out.push({ TrmId: trmId, SoId: s });
   }
   return out;
@@ -496,11 +603,21 @@ export function runMerge(input: RunInput): OutRow[] {
     }
     case "gro_bread_milk": {
       if (!fgRows.length) return [];
-      // Stores that have an FNV trip: Bread/Egg SoIds merge onto that FNV TrmId.
-      // Stores with NO FNV trip (grocery/Milk-vehicle-only stores): Bread/Egg SoIds
-      // fall back to merging onto that same store's own Milk TrmId instead.
-      // Same logic as fnv_gro_bread — see perStoreMapFallback.
-      return perStoreMapFallback(fgRows, (r) => typeIs(r, "FNV"), (r) => typeIs(r, "Milk"), (r) => typeIs(r, "Bakery_and_Egg"));
+      // GRO Merge (Bread + Milk): segregate out any store that has an FNV trip —
+      // those are handled by fnv_gro_bread instead. For the remaining non-FNV
+      // stores, merge their Bread/Egg SoId onto that same store's Milk TrmId.
+      // Prefer the city's dedicated FNV-store sheet (e.g. "benfnv") when it's
+      // populated; otherwise fall back to the Type column on the main sheet.
+      const fnvStoreSet = readFnvStoreSet(input.fgWb, city);
+      if (fnvStoreSet) {
+        return perStoreMapExcludingSet(fgRows, fnvStoreSet, (r) => typeIs(r, "Milk"), (r) => typeIs(r, "Bakery_and_Egg"));
+      }
+      return perStoreMapExcluding(
+        fgRows,
+        (r) => typeIs(r, "FNV"),
+        (r) => typeIs(r, "Milk"),
+        (r) => typeIs(r, "Bakery_and_Egg"),
+      );
     }
     case "fnv_gro_cbe_trichy": {
       if (!fgRows.length) return [];
