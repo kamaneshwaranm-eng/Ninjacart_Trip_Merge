@@ -17,15 +17,6 @@ export const CITIES = [
 const CITY_SHEET_ALIAS: Record<string, string> = {
   "Mum Watsapp": "Mumbai",
 };
-/**
- * Per-city sheet (in the same FG workbook) that lists ONLY the stores that
- * have an FNV trip — used by gro_bread_milk to segregate FNV stores out.
- * If this sheet is missing or empty, we fall back to detecting FNV per-store
- * from the Type column within the city's own FG sheet.
- */
-const CITY_FNV_STORE_SHEET: Record<string, string> = {
-  Bengaluru: "benfnv",
-};
 function sheetNameForCity(city: string): string {
   return CITY_SHEET_ALIAS[city] ?? city;
 }
@@ -35,9 +26,9 @@ export const MERGE_TYPES = [
   { id: "gro", label: "GRO Merge", needsBase: false, needsFg: true, needsLoading: true, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_bread", label: "FNV + GRO Merge (Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_milk", label: "FNV + GRO Merge (Milk)", needsBase: false, needsFg: true, needsLoading: true, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
-  { id: "gro_milk_bread", label: "GRO Merge (Milk + Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
+  { id: "milk_vehicle_bread", label: "Milk Vehicle (Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   
-  { id: "gro_bread_milk", label: "GRO Merge (Bread + Milk)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
+  { id: "gro_bread_milk", label: "GRO Merge (Bread + Milk)", needsBase: true, needsFg: false, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_cbe_trichy", label: "FNV + GRO Merge (Coimbatore / Trichy)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_chennai", label: "FNV + GRO Merge (Chennai drops)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: true, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "watsapp", label: "WhatsApp Merge", needsBase: true, needsFg: false, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: false, needsRemarksFile: false },
@@ -54,8 +45,8 @@ export const CITY_MERGE_TYPES: Record<string, MergeTypeId[]> = {
   Coimbatore: ["fnv", "fnv_gro_cbe_trichy"],
   Trichy: ["fnv", "fnv_gro_cbe_trichy"],
   Chennai: ["fnv", "fnv_gro_chennai"],
-  Bengaluru: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_milk", "gro_milk_bread", "gro_bread_milk", "watsapp"],
-  Mumbai: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_milk", "gro_milk_bread", "gro_bread_milk", "watsapp"],
+  Bengaluru: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_milk", "milk_vehicle_bread", "gro_bread_milk", "watsapp"],
+  Mumbai: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_milk", "gro_bread_milk", "watsapp"],
   "Mum Watsapp": ["mum_watsapp_fnv", "mum_egg_vehicle", "mum_milk_vehicle_egg_bread"],
 };
 
@@ -164,147 +155,6 @@ function processWatsappGroups(
       if (i === maxIdx) continue; // skip the anchor's own SoIds
       for (const s of infos[i].soIds) out.push({ TrmId: anchorTrm, SoId: s });
     }
-  }
-  return out;
-}
-
-/**
- * Reads the city's dedicated FNV-store-list sheet (e.g. "benfnv" for
- * Bengaluru) from the FG workbook, if present and populated. Returns the set
- * of normalized CustomerNames that have FNV, or null if that sheet doesn't
- * exist yet / has no data rows — callers should fall back to detecting FNV
- * from the Type column of the main FG sheet in that case.
- */
-function readFnvStoreSet(fgWb: XLSX.WorkBook | null, city: string): Set<string> | null {
-  const sheetName = CITY_FNV_STORE_SHEET[city];
-  if (!sheetName || !fgWb || !fgWb.Sheets[sheetName]) return null;
-  const rows = readSheet(fgWb, sheetName);
-  if (!rows.length) return null;
-  const set = new Set<string>();
-  for (const r of rows) {
-    const custKey = pickCol(r, "CustomerName") || "CustomerName";
-    const cust = norm(r[custKey]);
-    if (cust) set.add(cust);
-  }
-  return set.size ? set : null;
-}
-
-/**
- * Per-store mapping that EXCLUDES any store whose CustomerName is present in
- * excludeCustomers — used for GRO Merge (Bread + Milk) when a dedicated FNV
- * store-list sheet is available: only stores NOT in that set are considered;
- * for those, Bread/Egg SoIds merge onto that same store's Milk TrmId.
- */
-function perStoreMapExcludingSet(
-  fg: Row[],
-  excludeCustomers: Set<string>,
-  trmFilter: (r: Row) => boolean,
-  soIdFilter: (r: Row) => boolean,
-): OutRow[] {
-  const out: OutRow[] = [];
-  const byCust = new Map<string, { trms: any[]; sos: any[] }>();
-  for (const r of fg) {
-    const custKey = pickCol(r, "CustomerName") || "CustomerName";
-    const cust = norm(r[custKey]);
-    if (!cust || excludeCustomers.has(cust)) continue;
-    if (!byCust.has(cust)) byCust.set(cust, { trms: [], sos: [] });
-    const entry = byCust.get(cust)!;
-    if (trmFilter(r)) {
-      const t = r[pickCol(r, "TrmId") || "TrmId"];
-      if (t != null && t !== "") entry.trms.push(t);
-    }
-    if (soIdFilter(r)) {
-      const s = r[pickCol(r, "SoId") || "SoId"];
-      if (s != null && s !== "") entry.sos.push(s);
-    }
-  }
-  for (const { trms, sos } of byCust.values()) {
-    if (!trms.length || !sos.length) continue;
-    const trmId = trms[0];
-    for (const s of sos) out.push({ TrmId: trmId, SoId: s });
-  }
-  return out;
-}
-
-/**
- * Per-store mapping with a fallback TrmId source: for each store, prefer the
- * primary filter's TrmId (e.g. FNV); if that store has none, fall back to the
- * fallback filter's TrmId instead (e.g. Milk) — so a store with no FNV trip
- * still gets its Bread/Egg SoIds merged, just onto its Milk (grocery) vehicle
- * trip instead of an FNV one.
- */
-function perStoreMapFallback(
-  fg: Row[],
-  primaryTrmFilter: (r: Row) => boolean,
-  fallbackTrmFilter: (r: Row) => boolean,
-  soIdFilter: (r: Row) => boolean,
-): OutRow[] {
-  const out: OutRow[] = [];
-  const byCust = new Map<string, { primaryTrms: any[]; fallbackTrms: any[]; sos: any[] }>();
-  for (const r of fg) {
-    const custKey = pickCol(r, "CustomerName") || "CustomerName";
-    const cust = norm(r[custKey]);
-    if (!cust) continue;
-    if (!byCust.has(cust)) byCust.set(cust, { primaryTrms: [], fallbackTrms: [], sos: [] });
-    const entry = byCust.get(cust)!;
-    if (primaryTrmFilter(r)) {
-      const t = r[pickCol(r, "TrmId") || "TrmId"];
-      if (t != null && t !== "") entry.primaryTrms.push(t);
-    }
-    if (fallbackTrmFilter(r)) {
-      const t = r[pickCol(r, "TrmId") || "TrmId"];
-      if (t != null && t !== "") entry.fallbackTrms.push(t);
-    }
-    if (soIdFilter(r)) {
-      const s = r[pickCol(r, "SoId") || "SoId"];
-      if (s != null && s !== "") entry.sos.push(s);
-    }
-  }
-  for (const { primaryTrms, fallbackTrms, sos } of byCust.values()) {
-    if (!sos.length) continue;
-    const trmId = primaryTrms.length ? primaryTrms[0] : fallbackTrms.length ? fallbackTrms[0] : undefined;
-    if (trmId == null) continue;
-    for (const s of sos) out.push({ TrmId: trmId, SoId: s });
-  }
-  return out;
-}
-
-/**
- * Per-store mapping that EXCLUDES any store which has an "excludeFilter" row
- * (e.g. FNV) — used for GRO Merge (Bread + Milk): only stores with NO FNV
- * trip are considered; for those, Bread/Egg SoIds merge onto that same
- * store's Milk TrmId. Stores that do have FNV are segregated out entirely
- * (they're handled by fnv_gro_bread instead).
- */
-function perStoreMapExcluding(
-  fg: Row[],
-  excludeFilter: (r: Row) => boolean,
-  trmFilter: (r: Row) => boolean,
-  soIdFilter: (r: Row) => boolean,
-): OutRow[] {
-  const out: OutRow[] = [];
-  const byCust = new Map<string, { excluded: boolean; trms: any[]; sos: any[] }>();
-  for (const r of fg) {
-    const custKey = pickCol(r, "CustomerName") || "CustomerName";
-    const cust = norm(r[custKey]);
-    if (!cust) continue;
-    if (!byCust.has(cust)) byCust.set(cust, { excluded: false, trms: [], sos: [] });
-    const entry = byCust.get(cust)!;
-    if (excludeFilter(r)) entry.excluded = true;
-    if (trmFilter(r)) {
-      const t = r[pickCol(r, "TrmId") || "TrmId"];
-      if (t != null && t !== "") entry.trms.push(t);
-    }
-    if (soIdFilter(r)) {
-      const s = r[pickCol(r, "SoId") || "SoId"];
-      if (s != null && s !== "") entry.sos.push(s);
-    }
-  }
-  for (const { excluded, trms, sos } of byCust.values()) {
-    if (excluded) continue; // store has FNV — segregated out, not part of this merge
-    if (!trms.length || !sos.length) continue;
-    const trmId = trms[0];
-    for (const s of sos) out.push({ TrmId: trmId, SoId: s });
   }
   return out;
 }
@@ -549,15 +399,13 @@ export function runMerge(input: RunInput): OutRow[] {
     }
     case "fnv_gro_bread": {
       if (!fgRows.length) return [];
-      // Stores that have an FNV trip: Bread/Egg SoIds merge onto that FNV TrmId (as before).
-      // Stores with NO FNV trip (grocery/Milk-vehicle-only stores): Bread/Egg SoIds fall back
-      // to merging onto that same store's own Milk TrmId instead.
-      return perStoreMapFallback(fgRows, (r) => typeIs(r, "FNV"), (r) => typeIs(r, "Milk"), (r) => typeIs(r, "Bakery_and_Egg"));
+      return perStoreMap(fgRows, (r) => typeIs(r, "FNV"), (r) => typeIs(r, "Bakery_and_Egg"));
     }
-    case "gro_milk_bread": {
+    case "milk_vehicle_bread": {
       if (!fgRows.length) return [];
-      // Straight per-store merge for the grocery/Milk vehicle: that store's own Milk-type
-      // TrmId + its Bakery_and_Egg (Bread) SoIds. No FNV involved at all.
+      // The Milk vehicle also carries Bread: that same store's own Milk-type TrmId is the
+      // anchor, and its Bakery_and_Egg (Bread) SoIds merge onto it — Bread onto Milk, not the
+      // other way round. No FNV involved, and no groups/loading sheet needed.
       return perStoreMap(fgRows, (r) => typeIs(r, "Milk"), (r) => typeIs(r, "Bakery_and_Egg"));
     }
     case "fnv_gro_milk": {
@@ -602,22 +450,47 @@ export function runMerge(input: RunInput): OutRow[] {
       return out;
     }
     case "gro_bread_milk": {
-      if (!fgRows.length) return [];
-      // GRO Merge (Bread + Milk): segregate out any store that has an FNV trip —
-      // those are handled by fnv_gro_bread instead. For the remaining non-FNV
-      // stores, merge their Bread/Egg SoId onto that same store's Milk TrmId.
-      // Prefer the city's dedicated FNV-store sheet (e.g. "benfnv") when it's
-      // populated; otherwise fall back to the Type column on the main sheet.
-      const fnvStoreSet = readFnvStoreSet(input.fgWb, city);
-      if (fnvStoreSet) {
-        return perStoreMapExcludingSet(fgRows, fnvStoreSet, (r) => typeIs(r, "Milk"), (r) => typeIs(r, "Bakery_and_Egg"));
+      if (!baseRows.length || !input.groups) return [];
+      const out: OutRow[] = [];
+      const kc = keyOf(baseRows[0]);
+      const tripKey = pickCol(baseRows[0], "TripID", "Trip ID", "TripId") || "TripID";
+      const trmKey = pickCol(baseRows[0], "TrmId", "Trmid", "Trm Id") || "TrmId";
+      const soKey = pickCol(baseRows[0], "SoId", "So Id") || "SoId";
+      for (const grp of input.groups) {
+        const items = grp.filter((x) => x && x.trim());
+        if (items.length < 2) continue;
+        const rowsInGroup = baseRows.filter((r) => items.some((it) => norm(r[kc]) === norm(it)));
+        if (!rowsInGroup.length) continue;
+        const tripToSoIds = new Map<string, any[]>();
+        const tripToTrm = new Map<string, any>();
+        for (const r of rowsInGroup) {
+          const tid = String(r[tripKey] ?? "").trim();
+          if (!tid) continue;
+          if (!tripToSoIds.has(tid)) tripToSoIds.set(tid, []);
+          const s = r[soKey];
+          if (s != null && s !== "") tripToSoIds.get(tid)!.push(s);
+          const t = r[trmKey];
+          if (t != null && t !== "" && !tripToTrm.has(tid)) tripToTrm.set(tid, t);
+        }
+        let anchorTrm: any = null;
+        for (const [tid, sos] of tripToSoIds) {
+          if (sos.length > 1 && tripToTrm.has(tid)) {
+            anchorTrm = tripToTrm.get(tid);
+            break;
+          }
+        }
+        if (anchorTrm == null) {
+          for (const t of tripToTrm.values()) {
+            if (t != null && t !== "") { anchorTrm = t; break; }
+          }
+        }
+        if (anchorTrm == null) continue;
+        for (const r of rowsInGroup) {
+          const s = r[soKey];
+          if (s != null && s !== "") out.push({ TrmId: anchorTrm, SoId: s });
+        }
       }
-      return perStoreMapExcluding(
-        fgRows,
-        (r) => typeIs(r, "FNV"),
-        (r) => typeIs(r, "Milk"),
-        (r) => typeIs(r, "Bakery_and_Egg"),
-      );
+      return out;
     }
     case "fnv_gro_cbe_trichy": {
       if (!fgRows.length) return [];
@@ -646,11 +519,12 @@ export function runMerge(input: RunInput): OutRow[] {
     case "mum_watsapp_fnv": {
       if (!fgRows.length || !input.groups) return [];
       const kc = keyOf(fgRows[0]);
-      // Normally only FNV + Bakery_and_Egg count (Milk is excluded). Exception:
-      // stores that show up as FNV trips (Trip No containing "FNV") — read
-      // from whichever of these is uploaded: the Loading sheet, the vehicle
-      // trip file, or the Ground file (it often carries the same TRIP NO.
-      // column). For those stores alone, Milk-type rows are also counted.
+      // FNV + Bakery_and_Egg + Staples always count. Milk is the one
+      // exception: it's excluded UNLESS the store shows up as an FNV trip
+      // (Trip No containing "FNV") — read from whichever of these is
+      // uploaded: the Loading sheet, the vehicle trip file, or the Ground
+      // file (it often carries the same TRIP NO. column). For those stores
+      // alone, Milk-type rows are also counted.
       let exceptionStores = new Set<string>();
       const loadingSource = input.tripGroupsWb
         ? parseTripGroupFile(input.tripGroupsWb)
@@ -666,7 +540,7 @@ export function runMerge(input: RunInput): OutRow[] {
         );
       }
       const filterFor = (item: string) => (r: Row) => {
-        if (typeIs(r, "FNV") || typeIs(r, "Bakery_and_Egg")) return true;
+        if (typeIs(r, "FNV") || typeIs(r, "Bakery_and_Egg") || typeIs(r, "Staples")) return true;
         if (typeIs(r, "Milk") && exceptionStores.has(norm(item))) return true;
         return false;
       };
