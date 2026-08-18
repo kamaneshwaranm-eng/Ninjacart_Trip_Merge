@@ -309,11 +309,7 @@ function Dashboard() {
               hint={
                 mergeType === "fnv_gro_cbe_trichy"
                   ? "Upload your 6620 Base file here (Coimbatore / Trichy sheet) — same file, this dashboard just reads it directly for this merge type."
-                  : mergeType === "fnv_gro_bread" || mergeType === "gro_bread_milk"
-                    ? "Sheets per city with Type column (FNV, Milk, Bakery_and_Egg). Bread/Egg merges onto that store's FNV trip if it has one; stores with no FNV trip fall back to merging onto their own Milk (grocery vehicle) trip instead."
-                    : mergeType === "gro_milk_bread"
-                      ? "Sheets per city with Type column (Milk, Bakery_and_Egg). Each store's Bread/Egg SoIds merge onto that same store's own Milk (grocery vehicle) TrmId."
-                      : "Sheets per city with Type column (FNV, Milk, Bakery_and_Egg)"
+                  : "Sheets per city with Type column (FNV, Milk, Bakery_and_Egg, Staples)"
               }
               value={fgWb}
               onChange={setFgWb}
@@ -342,7 +338,7 @@ function Dashboard() {
                 hint={
                   mergeType === "mum_watsapp_fnv"
                     ? 'TRIP NO. + Store Name columns. Stores in trips whose TRIP NO. contains "FNV" are the exception — Milk-type SoIds are also counted for them alone (same rule as the Loading sheet, just read from this file instead).'
-                    : 'TRIP NO. + Store Name columns (e.g. a route plan with Vehicle Type, Driver Name, Drop Point Number). Trips whose TRIP NO. is "FNV" are handled separately from numeric trips — GRO merge excludes them, FNV + GRO (Milk) merge uses only them.'
+                    : 'TRIP NO. + Store Name columns (e.g. a route plan with Vehicle Type, Driver Name, Drop Point Number). Stores sharing the same TRIP NO. are merged together directly — no FNV/numeric filtering needed.'
                 }
                 value={tripGroupsWb}
                 onChange={(v) => {
@@ -384,12 +380,13 @@ function Dashboard() {
               </label>
               <p className="mt-1 text-xs text-muted-foreground">
                 One group per line. Separate items with commas. First item's TRMID is used; remaining items contribute SoIds.
+                {mergeType === "gro_bread_milk" && " (Bangalore: uses 6620 base file; anchor TRMID is the trip with multiple SoIds; all drops' SoIds map to it.)"}
                 {mergeType === "watsapp" &&
                   " (WhatsApp Merge: uses the 6620 Base file only. Each line is a trip/customer group to be merged. Whichever item has the MOST SoIds in the base file becomes the anchor — its TRMID is used, and its own SoIds are skipped. Every other item's SoIds are matched to that anchor TRMID.)"}
                 {mergeType === "fnv_gro_chennai" &&
                   " (Chennai: customer 1's FNV TRMID is the anchor. Customer 1's own GRO SoId is included, plus every other customer's GRO SoId — all mapped to customer 1's TRMID.)"}
                 {mergeType === "mum_watsapp_fnv" &&
-                  " (Mum Watsapp: uses the FNV/GRO merge file, Mumbai sheet. Only FNV and Bakery_and_Egg count (Milk is excluded) — except stores flagged as FNV trips (Trip No containing \"FNV\") in the Loading sheet, the vehicle trip file, or the Ground file, where Milk counts too. Whichever item has the MOST matching SoIds becomes the anchor — its TRMID is used, its own SoIds are skipped. You can also upload a Ground file below to auto-build groups from merged Store Name rows.)"}
+                  " (Mum Watsapp: uses the FNV/GRO merge file, Mumbai sheet. FNV, Bakery_and_Egg, and Staples always count — Milk is excluded, except for stores flagged as FNV trips (Trip No containing \"FNV\") in the Loading sheet, the vehicle trip file, or the Ground file, where Milk counts too. Whichever item has the MOST matching SoIds becomes the anchor — its TRMID is used, its own SoIds are skipped. You can also upload a Ground file below to auto-build groups from merged Store Name rows.)"}
                 {mergeType === "mum_egg_vehicle" &&
                   " (Egg Vehicle: uses the FNV/GRO merge file, Mumbai sheet. Only Bakery_and_Egg counts — FNV and Milk are ignored. Any one item's TRMID is the anchor; the rest contribute SoIds. Upload the Ground file below to auto-build groups from merged Vehicle-type rows.)"}
                 {" "}You can also paste a screenshot directly into the box below, or upload one, and it'll be read via OCR.
