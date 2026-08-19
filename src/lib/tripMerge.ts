@@ -27,15 +27,15 @@ export const MERGE_TYPES = [
   { id: "fnv_gro_bread", label: "FNV + GRO Merge (Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_staples", label: "FNV + GRO Merge (Staples)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_milk", label: "FNV + GRO Merge (Milk)", needsBase: false, needsFg: true, needsLoading: true, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
-  { id: "milk_vehicle_bread", label: "Milk Vehicle (Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
+  { id: "milk_vehicle_bread", label: "Milk Vehicle (Bread) (Refresh)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   
   { id: "gro_bread_milk", label: "GRO Merge (Bread + Milk)", needsBase: true, needsFg: false, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_cbe_trichy", label: "FNV + GRO Merge (Coimbatore / Trichy)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
-  { id: "fnv_gro_chennai", label: "FNV + GRO Merge (Chennai drops)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: true, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
-  { id: "watsapp", label: "WhatsApp Merge", needsBase: true, needsFg: false, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: false, needsRemarksFile: false },
-  { id: "mum_watsapp_fnv", label: "FNV", needsBase: false, needsFg: true, needsLoading: true, needsGroups: true, needsBaseKind: true, needsGroundFile: true, needsRemarksFile: false },
-  { id: "mum_egg_vehicle", label: "Egg Vehicle (Egg & Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: true, needsRemarksFile: false },
-  { id: "mum_milk_vehicle_egg_bread", label: "Milk Vehicle (Egg & Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: true },
+  { id: "fnv_gro_chennai", label: "FNV + GRO Merge (Chennai drops) (Refresh)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: true, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
+  { id: "watsapp", label: "WhatsApp Merge (Refresh)", needsBase: true, needsFg: false, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: false, needsRemarksFile: false },
+  { id: "mum_watsapp_fnv", label: "FNV (Refresh)", needsBase: false, needsFg: true, needsLoading: true, needsGroups: true, needsBaseKind: true, needsGroundFile: true, needsRemarksFile: false },
+  { id: "mum_egg_vehicle", label: "Egg Vehicle (Egg & Bread) (Refresh)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: true, needsRemarksFile: false },
+  { id: "mum_milk_vehicle_egg_bread", label: "Milk Vehicle (Egg & Bread) (Refresh)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: true },
 ] as const;
 
 export type MergeTypeId = (typeof MERGE_TYPES)[number]["id"];
@@ -46,8 +46,8 @@ export const CITY_MERGE_TYPES: Record<string, MergeTypeId[]> = {
   Coimbatore: ["fnv", "fnv_gro_cbe_trichy"],
   Trichy: ["fnv", "fnv_gro_cbe_trichy"],
   Chennai: ["fnv", "fnv_gro_chennai"],
-  Bengaluru: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_staples", "fnv_gro_milk", "milk_vehicle_bread", "gro_bread_milk", "watsapp"],
-  Mumbai: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_staples", "fnv_gro_milk", "gro_bread_milk", "watsapp"],
+  Bengaluru: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_staples", "fnv_gro_milk", "milk_vehicle_bread", "watsapp"],
+  Mumbai: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_staples", "fnv_gro_milk", "watsapp"],
   "Mum Watsapp": ["mum_watsapp_fnv", "mum_egg_vehicle", "mum_milk_vehicle_egg_bread"],
 };
 
