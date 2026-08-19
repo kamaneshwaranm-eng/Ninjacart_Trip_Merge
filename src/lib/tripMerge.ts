@@ -25,6 +25,7 @@ export const MERGE_TYPES = [
   { id: "fnv", label: "FNV Merge", needsBase: true, needsFg: false, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: false, needsRemarksFile: false },
   { id: "gro", label: "GRO Merge", needsBase: false, needsFg: true, needsLoading: true, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_bread", label: "FNV + GRO Merge (Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
+  { id: "fnv_gro_staples", label: "FNV + GRO Merge (Staples)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "fnv_gro_milk", label: "FNV + GRO Merge (Milk)", needsBase: false, needsFg: true, needsLoading: true, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   { id: "milk_vehicle_bread", label: "Milk Vehicle (Bread)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
   
@@ -45,8 +46,8 @@ export const CITY_MERGE_TYPES: Record<string, MergeTypeId[]> = {
   Coimbatore: ["fnv", "fnv_gro_cbe_trichy"],
   Trichy: ["fnv", "fnv_gro_cbe_trichy"],
   Chennai: ["fnv", "fnv_gro_chennai"],
-  Bengaluru: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_milk", "milk_vehicle_bread", "gro_bread_milk", "watsapp"],
-  Mumbai: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_milk", "gro_bread_milk", "watsapp"],
+  Bengaluru: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_staples", "fnv_gro_milk", "milk_vehicle_bread", "gro_bread_milk", "watsapp"],
+  Mumbai: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_staples", "fnv_gro_milk", "gro_bread_milk", "watsapp"],
   "Mum Watsapp": ["mum_watsapp_fnv", "mum_egg_vehicle", "mum_milk_vehicle_egg_bread"],
 };
 
@@ -401,12 +402,35 @@ export function runMerge(input: RunInput): OutRow[] {
       if (!fgRows.length) return [];
       return perStoreMap(fgRows, (r) => typeIs(r, "FNV"), (r) => typeIs(r, "Bakery_and_Egg"));
     }
+    case "fnv_gro_staples": {
+      if (!fgRows.length) return [];
+      // Same concept as fnv_gro_bread: that store's own FNV TrmId is the
+      // anchor, and its Staples SoIds merge onto it — Staples onto FNV.
+      return perStoreMap(fgRows, (r) => typeIs(r, "FNV"), (r) => typeIs(r, "Staples"));
+    }
     case "milk_vehicle_bread": {
       if (!fgRows.length) return [];
-      // The Milk vehicle also carries Bread: that same store's own Milk-type TrmId is the
-      // anchor, and its Bakery_and_Egg (Bread) SoIds merge onto it — Bread onto Milk, not the
-      // other way round. No FNV involved, and no groups/loading sheet needed.
-      return perStoreMap(fgRows, (r) => typeIs(r, "Milk"), (r) => typeIs(r, "Bakery_and_Egg"));
+      // Grocery-only stores (no FNV trip of their own): fold their Bread/Egg
+      // order onto whichever vehicle is already carrying their Milk order.
+      //
+      // Step 1 — segregate out FNV stores. Any store with at least one
+      // Type=FNV row in this same FNV+GRO merge file has its own FNV trip and
+      // is excluded entirely from this merge (handled instead by
+      // fnv_gro_bread, which merges Bread onto the FNV vehicle).
+      const custCol = pickCol(fgRows[0], "CustomerName") || "CustomerName";
+      const fnvStores = new Set<string>();
+      for (const r of fgRows) {
+        if (typeIs(r, "FNV")) {
+          const cust = norm(r[custCol]);
+          if (cust) fnvStores.add(cust);
+        }
+      }
+      const nonFnvRows = fgRows.filter((r) => !fnvStores.has(norm(r[custCol])));
+      // Step 2 — for the remaining non-FNV (grocery-only) stores, straight
+      // per-store merge: TrmId = that store's own Milk trip, SoId(s) = that
+      // store's own Bakery_and_Egg (Bread) sales orders. Stores with no Milk
+      // TrmId or no Bread SoId are skipped (nothing to merge).
+      return perStoreMap(nonFnvRows, (r) => typeIs(r, "Milk"), (r) => typeIs(r, "Bakery_and_Egg"));
     }
     case "fnv_gro_milk": {
       if (!fgRows.length) return [];
