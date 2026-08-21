@@ -36,6 +36,7 @@ export const MERGE_TYPES = [
   { id: "mum_watsapp_fnv", label: "FNV (Refresh)", needsBase: false, needsFg: true, needsLoading: true, needsGroups: true, needsBaseKind: true, needsGroundFile: true, needsRemarksFile: false },
   { id: "mum_egg_vehicle", label: "Egg Vehicle (Egg & Bread) (Refresh)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: true, needsBaseKind: true, needsGroundFile: true, needsRemarksFile: false },
   { id: "mum_milk_vehicle_egg_bread", label: "Milk Vehicle (Egg & Bread) (Refresh)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: true },
+  { id: "staples_refresh", label: "Staples Merge (Refresh)", needsBase: false, needsFg: true, needsLoading: false, needsGroups: false, needsBaseKind: false, needsGroundFile: false, needsRemarksFile: false },
 ] as const;
 
 export type MergeTypeId = (typeof MERGE_TYPES)[number]["id"];
@@ -43,9 +44,9 @@ export type MergeTypeId = (typeof MERGE_TYPES)[number]["id"];
 export const CITY_MERGE_TYPES: Record<string, MergeTypeId[]> = {
   Hyderabad: ["fnv"],
   Nashik: ["fnv"],
-  Coimbatore: ["fnv", "fnv_gro_cbe_trichy"],
-  Trichy: ["fnv", "fnv_gro_cbe_trichy"],
-  Chennai: ["fnv", "fnv_gro_chennai"],
+  Coimbatore: ["fnv", "fnv_gro_cbe_trichy", "staples_refresh"],
+  Trichy: ["fnv", "fnv_gro_cbe_trichy", "staples_refresh"],
+  Chennai: ["fnv", "fnv_gro_chennai", "staples_refresh"],
   Bengaluru: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_staples", "fnv_gro_milk", "milk_vehicle_bread", "watsapp"],
   Mumbai: ["fnv", "gro", "fnv_gro_bread", "fnv_gro_staples", "fnv_gro_milk", "watsapp"],
   "Mum Watsapp": ["mum_watsapp_fnv", "mum_egg_vehicle", "mum_milk_vehicle_egg_bread"],
@@ -592,6 +593,13 @@ export function runMerge(input: RunInput): OutRow[] {
       const eligibleRows = fgRows.filter((r) => eligible.has(norm(r[custKey])));
       // That store's Milk-type TrmId is matched with its own Bakery_and_Egg SoIds.
       return perStoreMap(eligibleRows, (r) => typeIs(r, "Milk"), (r) => typeIs(r, "Bakery_and_Egg"));
+    }
+    case "staples_refresh": {
+      if (!fgRows.length) return [];
+      // Same concept as fnv_gro_staples (BLR/Mumbai): from the FNV+GRO merge
+      // file, that store's own FNV TrmId is the anchor, and its Staples
+      // SoIds merge onto it. Used for Chennai / Coimbatore / Trichy.
+      return perStoreMap(fgRows, (r) => typeIs(r, "FNV"), (r) => typeIs(r, "Staples"));
     }
   }
   return [];
